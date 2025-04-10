@@ -10,51 +10,39 @@ from tkinter import ttk  # Import ttk for Progressbar
 from tkinter import messagebox  # Import messagebox for error windows
 
 # Function to copy files
-def copyFiles(targetDir, dir, progress_bar=None, progress_label=None, total_dirs=None, update_progress=None):
+def copyFiles(targetDir, dir):
     if os.path.exists(targetDir):
         return
     metaData = [f for f in glob.glob(f'{dir}/**', recursive=True) if f.split('.')[-1] == 'csv']
     if len(metaData) != 1:
-        show_error(f"Found more than one metadata file in {dir}. Skipping this directory.")
-        return
+        # messagebox.showerror("Error",f"Found more than one metadata file in {dir}.")
+        raise LookupError(f"Found more than one metadata file in {dir}.")
     niftifs = [f for f in glob.glob(f'{dir}/**', recursive=True) if f.endswith('.nii.gz')]
     metafile = metaData[0]
     df = pd.read_csv(metafile)
     nameVals = []
     if len(niftifs) != len(df):
-        show_error(f"Number of nii.gz files do not match dataframe rows in {dir}. Skipping this directory.")
-        return
+        # messagebox.showerror("Error",f"Number of nii.gz files do not match dataframe rows in {dir}.")
+        raise ValueError(f"Number of nii.gz files do not match dataframe rows in {dir}.")
     os.makedirs(targetDir, exist_ok=True)
     if '3D_annotation' in df:
         nameVals = df['3D_annotation'].tolist()
-        nameVals = map(lambda el: el.strip(), nameVals)
+        nameVals = map(lambda el: el.strip() if type(el) == str else el, nameVals)
     else:
-        show_error(f'Annotation name not found in {dir}. Skipping this directory.')
-        return
+        # messagebox.showerror("Error",f'Annotation name not found in {dir}.')
+        raise LookupError(f'Annotation name not found in {dir}.')
     niftifs.sort(key=lambda f: int(os.path.basename(f).split('.')[0].split('-')[1]))
 
     # Copy nii.gz files
-    for i, (nf, areaName) in enumerate(zip(niftifs, nameVals)):
+    for (nf, areaName) in zip(niftifs, nameVals):
         shutil.copyfile(nf, os.path.join(targetDir, f'{areaName}.nii.gz'))
-        if progress_bar:
-            progress_bar.step(1)  # Update the progress bar for nii.gz files
-            if progress_label and total_dirs:
-                update_progress(progress_bar['value'], total_dirs)
 
     # Copy DCM files
     dcmfs = [f for f in glob.glob(f'{dir}/**', recursive=True) if f.split('.')[-1] == 'dcm']
-    os.makedirs(os.path.join(targetDir, 'DCM'), exist_ok=True)
-    for i, dcmfile in enumerate(dcmfs):
+    os.makedirs(os.path.join(targetDir,'DCM'), exist_ok=True)
+    for dcmfile in dcmfs:
         shutil.copyfile(dcmfile, os.path.join(targetDir, 'DCM', os.path.basename(dcmfile)))
-        if progress_bar:
-            progress_bar.step(1)  # Update the progress bar for dcm files
-            if progress_label and total_dirs:
-                update_progress(progress_bar['value'], total_dirs)
 
-# Function to show an error message box and terminate the program
-def show_error(message):
-    messagebox.showerror("Error", message)
-    exit()  # Terminate the program
 
 # Main Tkinter application
 class Application(tk.Tk):
@@ -127,7 +115,8 @@ class Application(tk.Tk):
         targetDir = self.target_dir
 
         if not os.path.exists(originDir) or not os.path.exists(targetDir):
-            show_error("Invalid directories! Please select valid origin and target directories.")
+            messagebox.showerror("Error","Invalid directories! Please select valid origin and target directories.")
+            return
 
         rootdirs = [f for f in glob.glob(f'{originDir}/**') if os.path.isdir(f)]
         # print("from", originDir)
@@ -144,16 +133,23 @@ class Application(tk.Tk):
             subdirs = [f for f in glob.glob(f'{dir}/**') if os.path.isdir(f)]
             if len(subdirs) > 1:
                 for sbdr in subdirs:
-                    copyFiles(os.path.join(targetDir, os.path.basename(dir), os.path.basename(sbdr)), sbdr, 
-                              self.progress_bar, self.progress_label, len(rootdirs), self.update_progress)
+                    try:
+                        copyFiles(os.path.join(targetDir, os.path.basename(dir), os.path.basename(sbdr)), sbdr)
+                    except Exception as e:
+                        messagebox.showerror("Error", e)
+                        return
             else:
-                copyFiles(os.path.join(targetDir, os.path.basename(dir)), dir, 
-                          self.progress_bar, self.progress_label, len(rootdirs), self.update_progress)
+                try:
+                    copyFiles(os.path.join(targetDir, os.path.basename(dir)), dir)
+                except Exception as e:
+                        messagebox.showerror("Error", e)
+                        return
 
             # Update the progress bar after processing each directory
             copied_dirs += 1
-            self.progress_bar["value"] = copied_dirs
+            self.progress_bar.step()
             self.update_progress(copied_dirs, len(rootdirs))
+            self.update_idletasks()
 
         # print("File copy completed!")
 
